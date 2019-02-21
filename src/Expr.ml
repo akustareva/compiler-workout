@@ -36,12 +36,34 @@ let update x v s = fun y -> if x = y then v else s y
 let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
 
 (* Some testing; comment this definition out when submitting the solution. *)
-let _ =
+(* let _ =
   List.iter
     (fun x ->
        try  Printf.printf "%s=%d\n" x @@ s x
        with Failure s -> Printf.printf "%s\n" s
-    ) ["x"; "a"; "y"; "z"; "t"; "b"]
+    ) ["x"; "a"; "y"; "z"; "t"; "b"] *)
+
+let apply_op op =
+  let apply_res_func f g x y = f (g x y) in
+  let bool_to_int x          = if x then 1 else 0 in
+  let int_to_bool x          = x <> 0 in
+  let apply_logical_op f x y = f (int_to_bool x) (int_to_bool y) in
+
+  match op with
+    | "+"  -> (  +  )
+    | "-"  -> (  -  )
+    | "*"  -> (  *  )
+    | "/"  -> (  /  )
+    | "%"  -> ( mod )
+    | "<"  -> apply_res_func bool_to_int ( <  )
+    | ">"  -> apply_res_func bool_to_int ( >  )
+    | "<=" -> apply_res_func bool_to_int ( <= )
+    | ">=" -> apply_res_func bool_to_int ( >= )
+    | "==" -> apply_res_func bool_to_int ( =  )
+    | "!=" -> apply_res_func bool_to_int ( <> )
+    | "&&" -> apply_res_func bool_to_int (apply_logical_op ( && ))
+    | "!!" -> apply_res_func bool_to_int (apply_logical_op ( || ))
+    | _    -> failwith "Unknown operator"
 
 (* Expression evaluator
 
@@ -50,5 +72,9 @@ let _ =
    Takes a state and an expression, and returns the value of the expression in 
    the given state.
 *)
-let eval = failwith "Not implemented yet"
-                    
+let rec eval s e =
+  match e with
+    | Const x          -> x
+    | Var x            -> s x
+    | Binop (op, x, y) -> apply_op op (eval s x) (eval s y)
+
