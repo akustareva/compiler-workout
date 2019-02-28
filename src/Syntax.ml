@@ -2,6 +2,7 @@
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT 
+open List
     
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -33,6 +34,28 @@ module Expr =
       to value v and returns the new state.
     *)
     let update x v s = fun y -> if x = y then v else s y
+    
+    let apply_op op =
+      let apply_res_func f g x y = f (g x y) in
+      let bool_to_int x          = if x then 1 else 0 in
+      let int_to_bool x          = x <> 0 in
+      let apply_logical_op f x y = f (int_to_bool x) (int_to_bool y) in
+
+      match op with
+        | "+"  -> (  +  )
+        | "-"  -> (  -  )
+        | "*"  -> (  *  )
+        | "/"  -> (  /  )
+        | "%"  -> ( mod )
+        | "<"  -> apply_res_func bool_to_int ( <  )
+        | ">"  -> apply_res_func bool_to_int ( >  )
+        | "<=" -> apply_res_func bool_to_int ( <= )
+        | ">=" -> apply_res_func bool_to_int ( >= )
+        | "==" -> apply_res_func bool_to_int ( =  )
+        | "!=" -> apply_res_func bool_to_int ( <> )
+        | "&&" -> apply_res_func bool_to_int (apply_logical_op ( && ))
+        | "!!" -> apply_res_func bool_to_int (apply_logical_op ( || ))
+        | _    -> failwith "Unknown operator"
 
     (* Expression evaluator
 
@@ -41,7 +64,11 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval s e =
+      match e with
+        | Const x          -> x
+        | Var x            -> s x
+        | Binop (op, x, y) -> apply_op op (eval s x) (eval s y)
 
   end
                     
@@ -65,7 +92,13 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval (s, i, o) t =
+      match t with
+        | Read v        -> (Expr.update v (hd i) s, tl i, o)
+        | Write e       -> (s, i, Expr.eval s e :: o)
+        | Assign (v, e) -> (Expr.update v (Expr.eval s e) s, i, o)
+        | Seq (s1, s2)  -> let new_conf = eval (s, i, o) s1
+                           in eval new_conf s2
                                                          
   end
 
