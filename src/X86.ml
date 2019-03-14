@@ -73,6 +73,77 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let get_suffix op =
+  match op with
+    | "<"  -> "l"
+    | ">"  -> "g"
+    | "<=" -> "le"
+    | ">=" -> "ge"
+    | "==" -> "e"
+    | "!=" -> "ne"
+
+let process_binop op op1 op2 st =
+  let clear reg      = Binop ("^", reg, reg) in
+  let divide_seq reg = [
+                         clear edx;
+                         Mov (op1, eax);
+                         Cltd;
+                         IDiv op2;
+                         Mov (reg, st)
+                       ] in
+  match op with
+    | "+" | "-" | "*" -> [
+                           Mov (op1, eax);
+                           Binop (op, op2, eax);
+                           Mov (eax, st)
+                         ]
+    | "/"             -> divide_seq eax
+    | "%"             -> divide_seq edx
+    | "<" | ">"
+    | "<=" | ">="
+    | "==" | "!="     -> [
+                           clear eax;
+                           Mov (op1, edx);
+                           Binop ("cmp", op2, edx);
+                           Set (get_suffix op, "%al");
+                           Mov (eax, st)
+                         ]
+    | "!!"            -> [
+                           clear eax;
+                           Mov (op1, edx);
+                           Binop ("!!", op2, edx);
+                           Set ("nz", "%al");
+                           Mov (eax, st)
+                         ]
+    | "&&"            -> [
+                           clear eax;
+                           clear edx;
+                           Binop("cmp", L 0, op1);
+                           Set("ne", "%al");
+                           Binop("cmp", L 0, op2);
+                           Set("ne", "%dl");
+                           Binop("&&", edx, eax);
+                           Mov(eax, st)
+                         ]
+
+let process_instr env inst =
+  match inst with
+    | BINOP op -> let x, y, env = env#pop2 in
+                  let st, env   = env#allocate in
+                  env, process_binop op y x st
+    | CONST n  -> let st, env_ = env#allocate in
+                  env_, [Mov (L n, st)]
+    | READ     -> let st, env_ = env#allocate in
+                  env_, [Call "Lread"; Mov (eax, st)]
+    | WRITE    -> let sv, env_ = env#pop in
+                  env_, [Push sv; Call "Lwrite"; Pop eax]
+    | LD v     -> let st, env_ = env#allocate in
+                  let sv       = env#loc v    in
+                  env_, [Mov (M sv, st)]
+    | ST v     -> let svl, env_ = (env#global v)#pop in
+                  let sv        = env#loc v          in
+                  env_, [Mov (svl, M sv)]
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -80,7 +151,12 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+let rec compile env prg =
+  match prg with
+    | []        -> env, []
+    | x :: rest -> let env_, xs         = process_instr env x in
+                   let res_env, res_prg = compile env_ rest in
+                   res_env, xs @ res_prg
 
 (* A set of strings *)           
 module S = Set.Make (String)
