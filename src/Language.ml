@@ -2,6 +2,7 @@
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT
+open List
 
 (* Opening a library for combinator-based syntax analysis *)
 open Ostap.Combinators
@@ -150,11 +151,52 @@ module Stmt =
 
        which returns a list of formal parameters and a body for given definition
     *)
-    let rec eval _ = failwith "Not Implemented Yet"
+    let rec eval env (s, i, o) t =
+      match t with
+        | Read v          -> (State.update v (hd i) s, tl i, o)
+        | Write e         -> (s, i, o @ [Expr.eval s e])
+        | Assign (v, e)   -> (State.update v (Expr.eval s e) s, i, o)
+        | Seq (s1, s2)    -> let new_conf = eval env (s, i, o) s1 in
+                             eval env new_conf s2
+        | Skip            -> (s, i, o)
+        | If (e1, e2, e3) -> let r = Expr.eval s e1 in
+                             if r != 0 then eval env (s, i, o) e2 else eval env (s, i, o) e3
+        | While (e1, e2)  -> let r = Expr.eval s e1 in
+                             if r != 0 then eval env (eval env (s, i, o) e2) (While (e1, e2)) else (s, i, o)
+        | Repeat (e1, e2) -> let (s', i', o') = eval env (s, i, o) e1 in
+                             let r = Expr.eval s' e2 in
+                             if r != 0 then (s', i', o') else eval env (s', i', o') t
+        | Call (n, args)  -> let (names, vars, body) = env#definition n in
+                             let args' = List.combine names (List.map (Expr.eval s) args) in
+                             let state = State.push_scope s (names @ vars) in
+                             let fun_args = List.fold_left (fun s (name, value) -> State.update name value s) state args' in
+                             let (s', i', o') = eval env (fun_args, i, o) body in
+                             (State.drop_scope s' s, i', o')
                                 
     (* Statement parser *)
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      parse: st:stmt ";" rest:parse {Seq (st, rest)} | stmt;
+
+      stmt:
+          "read" "(" x:IDENT ")"                                           {Read x}
+        | "write" "(" e:!(Expr.parse) ")"                                  {Write e}
+        | x:IDENT ":=" e:!(Expr.parse)                                     {Assign (x, e)}
+        | "skip"                                                           {Skip}
+        | "if" s:parse_if                                                  {s}
+        | "while" c:!(Expr.parse) "do" e:parse "od"                        {While (c, e)}
+        | "repeat" e:parse "until" c:!(Expr.parse)                         {Repeat (e, c)}
+        | "for" i:parse "," c:!(Expr.parse) "," it:parse "do" e:parse "od" {Seq (i, While (c, Seq(e, it)))}
+        | n:IDENT "(" args:(!(Expr.parse))* ")"                            {Call (n, args)}
+        ;
+
+      parse_if:
+        c:!(Expr.parse) "then" e1:parse e2:parse_else {If (c, e1, e2)}
+        ;
+
+      parse_else:
+          "fi"                {Skip}
+        | "else" e:parse "fi" {e}
+        | "elif" s:parse_if   {s}
     )
       
   end
@@ -167,7 +209,13 @@ module Definition =
     type t = string * (string list * string list * Stmt.t)
 
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      parse: "fun" n:IDENT "(" args:(IDENT)* ")" local:(%"local" (IDENT)*)? "{" body:!(Stmt.parse) "}" {
+            let local =
+              match local with
+                | Some x -> x
+                | _ -> [] in
+            n, (args, local, body)
+        }
     )
 
   end
